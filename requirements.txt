@@ -1,2 +1,6 @@
 streamlit
-textblob
+transformers
+torch
+torchvision
+google-api-python-client
+python-dotenv
