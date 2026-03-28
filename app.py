@@ -1,8 +1,9 @@
 import streamlit as st 
 from textblob import TextBlob
+from transformers import pipeline
 
 
-
+sentiment_pipeline = pipeline("sentiment-analysis",model="distilbert-base-uncased-finetuned-sst-2-english")
 st.set_page_config(page_title="Sentiment Analyzer", page_icon="☕️")
 
 st.sidebar.title("App Info")
@@ -16,18 +17,18 @@ user_input = st.text_input("Your text here: ")
 
 if st.button("Analyze Sentiment"):
     if user_input:
-        blob = TextBlob(user_input)
-        sentiment = blob.sentiment.polarity 
+        result = sentiment_pipeline(user_input)[0]
+        sentiment_label = result['label']
+        confidence_score = result['score']
 
-        if sentiment > 0:
+        if sentiment_label == "POSITIVE":
             st.success("Sentiment: Positive")
-        elif sentiment < 0:
+        elif sentiment_label == "NEGATIVE":
             st.error("Sentiment: Negative")
         else:
             st.info("Sentiment: Neutral")
 
-        st.metric(label="Polarity Score", value=round(sentiment,2))
-        normalised_score = (sentiment+1)/2
-        st.progress(normalised_score)
+        st.metric(label="Confidence Score", value=f"{round(confidence_score*100,2)}%")
+        st.progress(float(confidence_score))
     else:
         st.warning("Please enter some text to analyse!")

@@ -1,3 +1,4 @@
 venv_sentiment_analysis/
 __pycache__/
-.DS_Store
+.DS_Store/
+.env
