@@ -20,11 +20,12 @@ st.divider()
 
 #downloads the model once and stores in the cache and loads it up from there everytime the app is run
 @st.cache_resource
-def load_model():
+def load_models():
     sentiment = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest") #for sentiment analysis
-    return sentiment
+    summarizer = pipeline("summarization",model="facebook/bart-large-cnn") #this model will be used to summarize the comments
+    return sentiment, summarizer
 
-sentiment_pipeline = load_model()
+sentiment_pipeline, summary_pipeline = load_models()
 
 #user inputs youtube vidoe link
 st.write("Enter a Youtube video link to analyse comments")
@@ -63,20 +64,28 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
 
                 for item in response.get("items",[]): #accessing one comment at a time 
                     comment = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
-                    comments_list.append(comment[:500]) #stores the comment in the list upto 500 chars (due to model input limit)
+                    comment_lower = comment.lower() 
+
+                    spam_flags = ["http", "www.", "href", "use code", "% off", 
+                            "discount", "subscribe", "my channel", "link below"]
+                    
+                    if not any(flag in comment_lower for flag in spam_flags): #if there's no spam flag in a comment then keep it
+                        comments_list.append(comment[:500]) #stores the comment in the list upto 500 chars (due to model input limit)
+                    if len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit 
+                        break
 
                 next_page_token = response.get("nextPageToken") #grab the current page value to send it for the nxt request and it also contains the info about whether a nxt page even exists or not
 
-                if not next_page_token or len(comments_list)>=500: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
+                if not next_page_token or len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
                     break
 
         st.success(f"Successfully extracted {len(comments_list)} comments!")
         st.divider()
 
-
-        positive_count = 0 
-        negative_count = 0
-        neutral_count = 0
+        #stores all the categorized comments in different lists
+        pos_comments = [] 
+        neg_comments = []
+        neu_comments = []
         total_count = len(comments_list)
 
          
@@ -85,15 +94,17 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
             #It returns a list with a dictionary inside it. so we put a [0] to directly get into the dictionary
             label = result['label'].lower()
 
-            #flagging each comment and counting the total number of positive or negaitve comments
+            #flagging each comment and storing them in their respective lists
             if "positive" in label or "label_2" in label :
-                positive_count += 1
+                pos_comments.append(c)
             elif "negative" in label or "label_0" in label:
-                negative_count += 1
+                neg_comments.append(c)
             else:
-                neutral_count += 1
+                neu_comments.append(c)
             
-
+        positive_count = len(pos_comments) #counts comments of each category
+        negative_count = len(neg_comments)
+        neutral_count = len(neu_comments)
 
         st.success ("Analysis Complete")
         st.divider()
@@ -115,6 +126,37 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                 st.metric(label="Negative Vibe", value=f"{neg_pct}%")
 
             st.progress(pos_pct/100) #progress bar showing the positive comments
+
+            st.divider()
+            st.subheader("AI Comment Summaries")
+
+            with st.spinner("Generating comment summaries for the Youtube video"):
+               #smashing all the comments together with a space between them and
+               # limiting the characters to 3500 coz of the summarization model limit 
+                raw_pos_text = " ".join(pos_comments)[:3500] 
+                raw_neg_text = " ".join(neg_comments)[:3500]
+
+                col_sum1, col_sum2 = st.columns(2)
+
+
+                with col_sum1:
+                    st.markdown("This is what people loved about the video")
+                    if len(raw_pos_text)>50:
+                        pos_summary = summary_pipeline(raw_pos_text, max_length = 50, min_length =20, do_sample = False)[0]['summary_text']
+                        #feeding the raw comment text to the model and accessing the summary text
+                        st.success(pos_summary)
+                    else:
+                        st.info("Not enough comments to summarize.")
+
+                with col_sum2:
+                    st.markdown("This is what people hated about the video")
+                    if len(raw_neg_text)>50:
+                        neg_summary = summary_pipeline(raw_neg_text,max_length = 50, min_length =20, do_sample = False)[0]['summary_text']
+                        #feeding the raw comment text to the model and accessing the summary text
+                        st.success(neg_summary)
+                    else:
+                        st.info("Not enough comments to summarize.")
+
     
         else:
             st.warning("The video had no comments/comments are disabled")
