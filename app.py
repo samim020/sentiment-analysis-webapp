@@ -21,7 +21,8 @@ st.divider()
 #downloads the model once and stores in the cache and loads it up from there everytime the app is run
 @st.cache_resource
 def load_model():
-    return pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest")
+    sentiment = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest") #for sentiment analysis
+    return sentiment
 
 sentiment_pipeline = load_model()
 
@@ -45,26 +46,43 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
 
         youtube = build('youtube','v3', developerKey=API_KEY) #connecting to the yt database
 
-        #creating request to the api for the comments
-        request =  youtube.commentThreads().list( 
-            part = "snippet",
-            videoId = video_id,
-            maxResults = 100,
-            textFormat = "plainText"
-        )
-        response = request.execute() #sending the request and saving return values from the google api in this "response" variable
+        comments_list = []
+        next_page_token = None #intial value of page we're in (to start with it's null)
+
+        with st.spinner("scraping upto 500 comments from Youtube..."):
+            while True:
+                #creating request to the api for the comments
+                request =  youtube.commentThreads().list( 
+                    part = "snippet",
+                    videoId = video_id,
+                    maxResults = 100,
+                    textFormat = "plainText",
+                    pageToken = next_page_token #pass the yt api the current page we're in. yt will give us the nxt one
+                )
+                response = request.execute() #sending the request and saving return values from the google api in this "response" variable
+
+                for item in response.get("items",[]): #accessing one comment at a time 
+                    comment = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
+                    comments_list.append(comment[:500]) #stores the comment in the list upto 500 chars (due to model input limit)
+
+                next_page_token = response.get("nextPageToken") #grab the current page value to send it for the nxt request and it also contains the info about whether a nxt page even exists or not
+
+                if not next_page_token or len(comments_list)>=500: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
+                    break
+
+        st.success(f"Successfully extracted {len(comments_list)} comments!")
+        st.divider()
+
 
         positive_count = 0 
         negative_count = 0
         neutral_count = 0
-        total_count = 0
+        total_count = len(comments_list)
 
-        for item in response.get("items",[]): #accessing one comment at a time 
-            comment = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"] 
-
-            short_comment = comment[:500] #clips down long comments to 500 chars coz of the model input limit
-
-            result = sentiment_pipeline(short_comment)[0]
+         
+        for c in comments_list:
+            result = sentiment_pipeline(c)[0] #passing each of the comments from the comments list to the model/pipeline
+            #It returns a list with a dictionary inside it. so we put a [0] to directly get into the dictionary
             label = result['label'].lower()
 
             #flagging each comment and counting the total number of positive or negaitve comments
@@ -75,7 +93,7 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
             else:
                 neutral_count += 1
             
-            total_count +=1
+
 
         st.success ("Analysis Complete")
         st.divider()
@@ -88,19 +106,18 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
             neu_pct = round((neutral_count/total_count)*100,1)
             neg_pct = round((negative_count/total_count)*100,1)
 
-        col1 , col2, col3 = st.columns(3) #streamlit column UI showing 3 categories of the comments
-        with col1:
-            st.metric(label="Positive Vibe", value=f"{pos_pct}%")
-        with col2:
-            st.metric(label="Neutral Vibe", value=f"{neu_pct}%")
-        with col3:
-            st.metric(label="Negative Vibe", value=f"{neg_pct}%")
+            col1 , col2, col3 = st.columns(3) #streamlit column UI showing 3 categories of the comments
+            with col1:
+                st.metric(label="Positive Vibe", value=f"{pos_pct}%")
+            with col2:
+                st.metric(label="Neutral Vibe", value=f"{neu_pct}%")
+            with col3:
+                st.metric(label="Negative Vibe", value=f"{neg_pct}%")
 
-        st.progress(pos_pct/100) #progress bar showing the positive comments
-    else:
-        st.error("Could not find a valid video id!")
-else:
-    st.warning("Please enter a video url for the comments analysis")
+            st.progress(pos_pct/100) #progress bar showing the positive comments
+    
+        else:
+            st.warning("The video had no comments/comments are disabled")
 
 
 
