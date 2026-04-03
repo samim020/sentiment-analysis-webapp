@@ -4,3 +4,4 @@ torch
 torchvision
 google-api-python-client
 python-dotenv
+genai    

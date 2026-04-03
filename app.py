@@ -3,29 +3,44 @@ from transformers import pipeline
 from googleapiclient.discovery import build
 import os
 from dotenv import load_dotenv
+from google import genai
 
 #loads the secret api key!
 load_dotenv()
-API_KEY = os.getenv("YOUTUBE_API_KEY")
+YT_API_KEY = os.getenv("YOUTUBE_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 #streamlit page UI setup
 st.set_page_config(page_title="YOUTUBE Comment Sentiment Analyzer", page_icon="🫥")
 
 st.sidebar.title("App Info")
-st.sidebar.info("This app pulls real YouTube comments and analyzes their emotional tone using a Deep Learning Transformer")
+st.sidebar.info("This app pulls real YouTube comments and analyzes & summarizes their emotional tone using anthropics LLM model")
 st.sidebar.caption("Built with Python & Streamlit")
 
 st.title("YouTube Comment Analyzer")
 st.divider()
 
+client = genai.Client(api_key=GEMINI_API_KEY) #connection to anthropic api
+
+def summarize_comment(comments_text: str, tone:str) -> str: #tone defines the comment is positive or negative
+    prompt = f"""Here are {tone} Youutube comments about a video: {comments_text} . In 2-3 sentences, summarize what the viewers {"loved" if tone == "positive" else "disliked"} about 
+    this video. Be specific and natural.""" #this prompt will be fed to the gemini llm.
+
+    message = client.models.generate_content(
+    model="gemini-3-flash-preview",
+    contents=prompt
+    )#the api takes a list as input with role and content in a dictionary
+
+    return message.text #the api returns a dictionary(message) . content is another nested dictionary inside the message dictionry , [0] selects another dictionary 
+    #in it(the 1st one). then we access the value with a "text" key inside
+
 #downloads the model once and stores in the cache and loads it up from there everytime the app is run
 @st.cache_resource
 def load_models():
     sentiment = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment-latest") #for sentiment analysis
-    summarizer = pipeline("summarization",model="facebook/bart-large-cnn") #this model will be used to summarize the comments
-    return sentiment, summarizer
+    return sentiment
 
-sentiment_pipeline, summary_pipeline = load_models()
+sentiment_pipeline = load_models()
 
 #user inputs youtube vidoe link
 st.write("Enter a Youtube video link to analyse comments")
@@ -34,7 +49,7 @@ video_url = st.text_input("Paste your Youtube video link here: ")
 
 if st.button("Analyze Video Comments"): #checks if analyse button is pressed
     video_id = ""
-    if video_url and API_KEY: #checks if API_KEY and video_url is present
+    if video_url and YT_API_KEY: #checks if API_KEY and video_url is present
         
         #clips the video id part from the url
         if "v=" in video_url:
@@ -45,7 +60,7 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
     if video_id: #checks if video_id is present
         st.info(f"Extracting comments from video id: {video_id}...")
 
-        youtube = build('youtube','v3', developerKey=API_KEY) #connecting to the yt database
+        youtube = build('youtube','v3', developerKey=YT_API_KEY) #connecting to the yt database
 
         comments_list = []
         next_page_token = None #intial value of page we're in (to start with it's null)
@@ -72,14 +87,14 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                     if not any(flag in comment_lower for flag in spam_flags): #if there's no spam flag in a comment then keep it
                         comments_list.append(comment[:500]) #stores the comment in the list upto 500 chars (due to model input limit)
                     if len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit 
-                        break
+                        break   
 
                 next_page_token = response.get("nextPageToken") #grab the current page value to send it for the nxt request and it also contains the info about whether a nxt page even exists or not
 
                 if not next_page_token or len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
                     break
 
-        st.success(f"Successfully extracted {len(comments_list)} comments!")
+        st.success(f"Successfully extracted {len(comments_list)} comments from the video!")
         st.divider()
 
         #stores all the categorized comments in different lists
@@ -142,8 +157,8 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                 with col_sum1:
                     st.markdown("This is what people loved about the video")
                     if len(raw_pos_text)>50:
-                        pos_summary = summary_pipeline(raw_pos_text, max_length = 50, min_length =20, do_sample = False)[0]['summary_text']
-                        #feeding the raw comment text to the model and accessing the summary text
+                        pos_summary = summarize_comment(raw_pos_text,"positive") #we pass the positive raw text as the comment text in the function and the tone as positive
+                        #and access the summary text
                         st.success(pos_summary)
                     else:
                         st.info("Not enough comments to summarize.")
@@ -151,8 +166,7 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                 with col_sum2:
                     st.markdown("This is what people hated about the video")
                     if len(raw_neg_text)>50:
-                        neg_summary = summary_pipeline(raw_neg_text,max_length = 50, min_length =20, do_sample = False)[0]['summary_text']
-                        #feeding the raw comment text to the model and accessing the summary text
+                        neg_summary = summarize_comment(raw_neg_text,"negative") 
                         st.success(neg_summary)
                     else:
                         st.info("Not enough comments to summarize.")
