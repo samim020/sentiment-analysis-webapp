@@ -34,6 +34,46 @@ def summarize_comment(comments_text: str, tone:str) -> str: #tone defines the co
     return message.text #the api returns a dictionary(message) . content is another nested dictionary inside the message dictionry , [0] selects another dictionary 
     #in it(the 1st one). then we access the value with a "text" key inside
 
+def get_video_metadata(video_id: str,youtube) -> dict: #function to fetch yt video metadata that takes the youtube connection object and the video id as input
+    request = youtube.videos().list(part="snippet,statistics", id =video_id)
+    response = request.execute()
+
+    if not response["items"]:
+        return None
+    
+    snippet = response["items"][0]["snippet"]
+    stats = response["items"][0]["statistics"]
+
+    return { #fetches all the metadata using the dictionary keys
+        "title": snippet["title"],                                          
+        "channel": snippet["channelTitle"],                                 
+        "published": snippet["publishedAt"][:10],                          
+        "thumbnail": snippet["thumbnails"]["high"]["url"],                  
+        "views": int(stats.get("viewCount", 0)),                          
+        "likes": int(stats.get("likeCount", 0)),                           
+        "comment_count": int(stats.get("commentCount", 0))
+    }
+
+def display_metadata(meta: dict): #func for rendering the metadata from the get_video_metadata function
+    col_thumb , col_info = st.columns([1,2]) #[1,2] means the info column is twice the width of the humbnail col
+
+    with col_thumb:
+        st.image(meta["thumbnail"],use_container_width=True) #renders the image and fills the whole column
+
+    with col_info: #rendering other metadata
+        st.markdown(f"Video Title: {meta['title']}")
+        st.markdown(f"Channel Name: {meta['channel']}")
+        st.markdown(f"Published At: {meta['published']}")
+        st.divider()
+        m1, m2 , m3 = st.columns(3)
+        with m1:
+            st.metric("Views: ",f"{meta['views']}")
+        with m2:
+            st.metric("Likes: ",f"{meta['likes']}")
+        with m3:
+            st.metric("Total Comments: ",f"{meta['comment_count']}")
+
+
 #downloads the model once and stores in the cache and loads it up from there everytime the app is run
 @st.cache_resource
 def load_models():
@@ -61,6 +101,11 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
         st.info(f"Extracting comments from video id: {video_id}...")
 
         youtube = build('youtube','v3', developerKey=YT_API_KEY) #connecting to the yt database
+
+        meta = get_video_metadata(video_id , youtube) #calling the get_video_metadata function to fetch metadata from the yt api
+        if meta:
+            display_metadata(meta) #passing the meta dictionary to the display_metadata function for it to get displayed
+            st.divider()
 
         comments_list = []
         next_page_token = None #intial value of page we're in (to start with it's null)
