@@ -153,12 +153,12 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                     
                     if not any(flag in comment_lower for flag in spam_flags): #if there's no spam flag in a comment then keep it
                         comments_list.append({"text":comment_text[:500],"likes":like_count}) #stores the comment in the list upto 500 chars (due to model input limit)
-                    if len(comments_list) >= 20: #stops storing comments in the list when we hit a 500 comment limit 
+                    if len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit 
                         break   
 
                 next_page_token = response.get("nextPageToken") #grab the current page value to send it for the nxt request and it also contains the info about whether a nxt page even exists or not
 
-                if not next_page_token or len(comments_list) >= 20: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
+                if not next_page_token or len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
                     break
 
         st.success(f"Successfully extracted {len(comments_list)} comments from the video!")
