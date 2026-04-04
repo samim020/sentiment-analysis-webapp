@@ -73,6 +73,26 @@ def display_metadata(meta: dict): #func for rendering the metadata from the get_
         with m3:
             st.metric("Total Comments: ",f"{meta['comment_count']}")
 
+def display_top_comments(comments:list , tone: str): #takes a list of comment dictionaries and sorts them according to their likes and displays the top ones
+    if not comments:
+        st.info("No comments in this category")
+        return
+    sorted_comments = sorted(comments, key=lambda c: c["likes"],reverse=True)
+    #sorts the comments based on the likes key inside each dictionary in descending order
+
+    top3 = sorted_comments[:3] #takes only top 3 comments
+    emoji = "💚" if tone == "positive" else "❤️"
+    st.markdown(f"Top {len(top3)} most liked {tone}{emoji} comments: ")
+
+    for comment in top3:
+        st.markdown(f""" <div style="
+                border-left: 4px solid {'#4CAF50' if tone == 'positive' else '#f44336'};
+                padding: 10px 15px;
+                margin: 8px 0;
+                border-radius: 4px;
+                background-color: rgba(255,255,255,0.05)
+            ">{comment['text']} <br>likes: {comment['likes']}</div>""",unsafe_allow_html=True)
+
 
 #downloads the model once and stores in the cache and loads it up from there everytime the app is run
 @st.cache_resource
@@ -118,25 +138,27 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                     videoId = video_id,
                     maxResults = 100,
                     textFormat = "plainText",
-                    pageToken = next_page_token #pass the yt api the current page we're in. yt will give us the nxt one
+                    pageToken = next_page_token, #pass the yt api the current page we're in. yt will give us the nxt one
+                    order = "relevance"
                 )
                 response = request.execute() #sending the request and saving return values from the google api in this "response" variable
 
                 for item in response.get("items",[]): #accessing one comment at a time 
-                    comment = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
-                    comment_lower = comment.lower() 
+                    comment_text = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"] #extracting comment text
+                    like_count=item["snippet"]["topLevelComment"]["snippet"].get("likeCount",0) #extracting likes in every comment
+                    comment_lower = comment_text.lower() 
 
                     spam_flags = ["http", "www.", "href", "use code", "% off", 
                             "discount", "subscribe", "my channel", "link below"]
                     
                     if not any(flag in comment_lower for flag in spam_flags): #if there's no spam flag in a comment then keep it
-                        comments_list.append(comment[:500]) #stores the comment in the list upto 500 chars (due to model input limit)
-                    if len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit 
+                        comments_list.append({"text":comment_text[:500],"likes":like_count}) #stores the comment in the list upto 500 chars (due to model input limit)
+                    if len(comments_list) >= 20: #stops storing comments in the list when we hit a 500 comment limit 
                         break   
 
                 next_page_token = response.get("nextPageToken") #grab the current page value to send it for the nxt request and it also contains the info about whether a nxt page even exists or not
 
-                if not next_page_token or len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
+                if not next_page_token or len(comments_list) >= 20: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
                     break
 
         st.success(f"Successfully extracted {len(comments_list)} comments from the video!")
@@ -150,7 +172,7 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
 
          
         for c in comments_list:
-            result = sentiment_pipeline(c)[0] #passing each of the comments from the comments list to the model/pipeline
+            result = sentiment_pipeline(c["text"])[0] #passing each of the comments from the comments list to the model/pipeline
             #It returns a list with a dictionary inside it. so we put a [0] to directly get into the dictionary
             label = result['label'].lower()
 
@@ -188,19 +210,28 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
             st.progress(pos_pct/100) #progress bar showing the positive comments
 
             st.divider()
+
+            st.subheader("Top Liked Comments") #this section displays the top liked comments
+            top_col1 , top_col2 = st.columns(2) 
+            with top_col1:
+                display_top_comments(pos_comments,"positive")
+            with top_col2:
+                display_top_comments(neg_comments,"negative")
+            st.divider()
+
             st.subheader("AI Comment Summaries")
 
             with st.spinner("Generating comment summaries for the Youtube video"):
                #smashing all the comments together with a space between them and
                # limiting the characters to 3500 coz of the summarization model limit 
-                raw_pos_text = " ".join(pos_comments)[:3500] 
-                raw_neg_text = " ".join(neg_comments)[:3500]
+                raw_pos_text = " ".join(c["text"] for c in pos_comments)[:3500] 
+                raw_neg_text = " ".join(c["text"] for c in neg_comments)[:3500]
 
                 col_sum1, col_sum2 = st.columns(2)
 
 
                 with col_sum1:
-                    st.markdown("This is what people loved about the video")
+                    st.markdown("What people loved: ")
                     if len(raw_pos_text)>50:
                         pos_summary = summarize_comment(raw_pos_text,"positive") #we pass the positive raw text as the comment text in the function and the tone as positive
                         #and access the summary text
@@ -209,7 +240,7 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                         st.info("Not enough comments to summarize.")
 
                 with col_sum2:
-                    st.markdown("This is what people hated about the video")
+                    st.markdown("What people didn't like: ")
                     if len(raw_neg_text)>50:
                         neg_summary = summarize_comment(raw_neg_text,"negative") 
                         st.success(neg_summary)
