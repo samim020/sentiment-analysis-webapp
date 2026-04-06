@@ -1,7 +1,6 @@
 streamlit
-transformers
-torch
-torchvision
 google-api-python-client
 python-dotenv
-genai    
+groq
+plotly
+transformers
