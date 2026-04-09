@@ -1,6 +1,5 @@
 streamlit
-google-api-python-client
-python-dotenv
 groq
+google-api-python-client
 plotly
-transformers
+python-dotenv

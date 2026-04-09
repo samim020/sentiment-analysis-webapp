@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from groq import Groq      
 import plotly.graph_objects as go      
 from collections import defaultdict
+import json
 
 #loads the secret api key!
 load_dotenv()
@@ -26,13 +27,66 @@ st.divider()
 client = Groq(api_key=GROQ_API_KEY)  #connection to llm api
 
 def summarize_comment(comments_text: str, tone:str) -> str: #tone defines the comment is positive or negative
-    prompt = f"""Here are {tone} Youutube comments about a video: {comments_text} . In 2-3 sentences, summarize what the viewers {"loved" if tone == "positive" else "disliked"} about 
+    prompt = f"""Here are {tone} Youtube comments about a video: {comments_text} . In 2-3 sentences, summarize what the viewers {"loved" if tone == "positive" else ("disliked" if tone == "negative" else "said neutrally")} about 
     this video. Be specific and natural.""" #this prompt will be fed to the llm api
 
     message = client.chat.completions.create(model="llama-3.3-70b-versatile",messages=[{"role":"user", "content":prompt}],max_tokens=150)#the api takes a list as input with role and content in a dictionary
     #max tokens can be changed according to api limitations
     return message.choices[0].message.content #the api returns a list(called choices). [0] gets the first element
     #and the message.content gets the actual string out
+
+def get_topic_clusters(comments: list)->list: #sends all the comments at once to the api llm for grouping them into clusters
+    all_text = " | ".join(c["text"] for c in comments[:200]) #joining first 200 comments with a pipe separator 
+
+    prompt = f"""Analyze these YouTube comments and identify 4-5 main recurring topics or themes that viewers are discussing.
+    Comments: {all_text} 
+    Respond ONLY with a JSON array. No explanation, no markdown, no backticks. Just the raw JSON array.
+    Each object must have exactly these two keys:
+    - "topic": a short 3-5 word label
+    - "description": one sentence explaining what viewers say about this topic
+
+    Example format:
+    [{{"topic": "Audio Quality", "description": "Many viewers complained the audio was too quiet during the chorus."}}]"""
+
+    response = client.chat.completions.create( #creating the api request for the clustering
+        model="llama-3.3-70b-versatile",
+        messages=[{"role":"system","content":"You are a JSON-only response bot. You never write anything except valid raw JSON arrays. No markdown, no backticks, no explanation."},
+                  {"role":"user","content":prompt}],max_tokens=500
+    )
+    raw =  response.choices[0].message.content.strip() 
+
+    try:
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        #backup cleanup in case the llm generates something off even after giving the strict instructions
+        return json.loads(raw) #converts the raw json data to python list of dictionaries
+    except json.JSONDecodeError:
+        return [] #if for some reason the parsing fails then an empty list is returned
+    
+def display_topic_clusters(topics:list):
+    if not topics:
+        st.info("Could not extract topics from comments.")
+        return
+    columns = st.columns(len(topics))
+    for i, topic in enumerate(topics):
+        with columns[i]:
+            st.markdown(
+                f"""
+                <div style="
+                    border: 1px solid rgba(255,255,255,0.15);
+                    border-radius: 8px;
+                    padding: 12px;
+                    height: 100%;
+                    background-color: rgba(255,255,255,0.03)
+                ">
+                    <strong>🏷️ {topic['topic']}</strong><br><br>
+                    <small>{topic['description']}</small>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    
+
+
 
 def get_video_metadata(video_id: str,youtube) -> dict: #function to fetch yt video metadata that takes the youtube connection object and the video id as input
     request = youtube.videos().list(part="snippet,statistics", id =video_id)
@@ -81,12 +135,12 @@ def display_top_comments(comments:list , tone: str): #takes a list of comment di
     #sorts the comments based on the likes key inside each dictionary in descending order
 
     top3 = sorted_comments[:3] #takes only top 3 comments
-    emoji = "💚" if tone == "positive" else "❤️"
+    emoji = "💚" if tone == "positive" else ("❤️" if tone=="negative" else "⚪️")
     st.markdown(f"Top {len(top3)} most liked {tone}{emoji} comments: ")
 
     for comment in top3:
         st.markdown(f""" <div style="
-                border-left: 4px solid {'#4CAF50' if tone == 'positive' else '#f44336'};
+                border-left: 4px solid {'#4CAF50' if tone == 'positive' else ('#f44336' if tone =="negative" else "#ffffff")};
                 padding: 10px 15px;
                 margin: 8px 0;
                 border-radius: 4px;
@@ -180,6 +234,35 @@ def display_sentiment_over_time(comments_list: list):
 
     st.plotly_chart(fig, use_container_width=True) #rendering the chart
 
+def get_overall_verdict (pos_pct: float, neg_pct: float, neu_pct: float, pos_summary: str, neg_summary: str) -> str:
+    #takes in all the sentiment percentages and both the summaries as well and generates a one paragraph verdict
+    prompt = f"""You are analyzing audience reception of a YouTube video.
+
+    Sentiment breakdown: {pos_pct}% positive, {neg_pct}% negative, {neu_pct}% neutral.
+    What people loved: {pos_summary}
+    What people disliked: {neg_summary}
+
+    Write a single punchy paragraph (3-4 sentences) summarizing the overall audience verdict on this video. 
+    Be direct, specific, and natural. Start with the dominant sentiment."""
+    
+    response = client.chat.completions.create(model="llama-3.3-70b-versatile",messages=[{"role":"user","content":prompt}],max_tokens=200)
+    return response.choices[0].message.content
+
+def display_verdict (verdict:str): #displays the verdict as a flash card in the app
+    st.markdown(
+        f"""
+        <div style="
+            border-left: 5px solid #2196F3;
+            padding: 15px 20px;
+            border-radius: 6px;
+            background-color: rgba(33, 150, 243, 0.08)
+        ">
+            <strong>Overall Verdict</strong><br><br>
+            {verdict}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 #user inputs youtube vidoe link
@@ -236,12 +319,12 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
                     if not any(flag in comment_lower for flag in spam_flags): #if there's no spam flag in a comment then keep it
                         comments_list.append({"text":comment_text[:500],"likes":like_count,"published_at":published_at}) #stores the comment in the list upto 500 chars (due to model input limit)
                         #along with its like count and published time stamp
-                    if len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit 
+                    if len(comments_list) >= 50: #stops storing comments in the list when we hit a 500 comment limit 
                         break   
 
                 next_page_token = response.get("nextPageToken") #grab the current page value to send it for the nxt request and it also contains the info about whether a nxt page even exists or not
 
-                if not next_page_token or len(comments_list) >= 500: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
+                if not next_page_token or len(comments_list) >= 50: #stops storing comments in the list when we hit a 500 comment limit or no nxt page exists (whichever happens first)
                     break
 
         st.success(f"Successfully extracted {len(comments_list)} comments from the video!")
@@ -292,6 +375,34 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
             neu_pct = round((neutral_count/total_count)*100,1)
             neg_pct = round((negative_count/total_count)*100,1)
 
+            with st.spinner("Generating comment summaries for the Youtube video..."):
+               #smashing all the comments together with a space between them and
+               # limiting the characters to 3500 coz of the summarization model limit 
+                raw_pos_text = " ".join(c["text"] for c in pos_comments)[:3500] 
+                raw_neg_text = " ".join(c["text"] for c in neg_comments)[:3500]
+                raw_neu_text = " ".join(c["text"] for c in neu_comments)[:3500]
+
+
+
+
+                #generating all three summaries upfront as we need them for the verdict
+                pos_summary = summarize_comment(raw_pos_text,"positive")  if len(raw_pos_text)>50 else "" 
+                #we pass the positive raw text as the comment text in the function and the tone as positive
+                #and access the summary text
+                
+                neg_summary = summarize_comment(raw_neg_text,"negative") if len(raw_neg_text)>50 else ""
+                
+                neu_summary = summarize_comment(raw_neu_text,"neutral") if len(raw_neu_text)>50 else ""
+
+                with st.spinner("Generating overall verdict..."): #displaying the overall verdict
+                    verdict = get_overall_verdict(pos_pct,neg_pct,neu_pct,pos_summary,neg_summary)
+                    display_verdict(verdict)
+                        
+            
+
+            
+
+
             col1 , col2, col3 = st.columns(3) #streamlit column UI showing 3 categories of the comments
             with col1:
                 st.metric(label="Positive Vibe", value=f"{pos_pct}%")
@@ -312,41 +423,42 @@ if st.button("Analyze Video Comments"): #checks if analyse button is pressed
 
 
             st.subheader("Top Liked Comments") #this section displays the top liked comments
-            top_col1 , top_col2 = st.columns(2) 
+            top_col1 , top_col2, top_col3 = st.columns(3) 
             with top_col1:
                 display_top_comments(pos_comments,"positive")
             with top_col2:
                 display_top_comments(neg_comments,"negative")
+            with top_col3:
+                display_top_comments(neu_comments,"neutral")
+            
             st.divider()
 
             st.subheader("AI Comment Summaries")
 
-            with st.spinner("Generating comment summaries for the Youtube video"):
-               #smashing all the comments together with a space between them and
-               # limiting the characters to 3500 coz of the summarization model limit 
-                raw_pos_text = " ".join(c["text"] for c in pos_comments)[:3500] 
-                raw_neg_text = " ".join(c["text"] for c in neg_comments)[:3500]
+        
 
-                col_sum1, col_sum2 = st.columns(2)
+            col_sum1, col_sum2, col_sum3 = st.columns(3)
 
 
-                with col_sum1:
-                    st.markdown("What people loved: ")
-                    if len(raw_pos_text)>50:
-                        pos_summary = summarize_comment(raw_pos_text,"positive") #we pass the positive raw text as the comment text in the function and the tone as positive
-                        #and access the summary text
-                        st.success(pos_summary)
-                    else:
-                        st.info("Not enough comments to summarize.")
+            with col_sum1:
+                st.markdown("What people loved: ")
+                st.success(pos_summary)
+                    
 
-                with col_sum2:
-                    st.markdown("What people didn't like: ")
-                    if len(raw_neg_text)>50:
-                        neg_summary = summarize_comment(raw_neg_text,"negative") 
-                        st.success(neg_summary)
-                    else:
-                        st.info("Not enough comments to summarize.")
+            with col_sum2:
+                st.markdown("What people didn't like: ")
+                st.success(neg_summary)
+                
 
+            with col_sum3:
+                st.markdown("What people observed neutrally: ")
+                st.success(neu_summary)
+                    
+
+            st.subheader("🏷️ What Viewers Are Talking About") #displaying the topic clusters
+            with st.spinner("Identifying recurring topics in comments..."):
+                topics = get_topic_clusters(comments_list)
+                display_topic_clusters(topics)
     
         else:
             st.warning("The video had no comments/comments are disabled")
