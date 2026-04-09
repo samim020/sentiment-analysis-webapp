@@ -15,7 +15,15 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 #streamlit page UI setup
-st.set_page_config(page_title="YOUTUBE Comment Sentiment Analyzer", page_icon="🫥")
+st.set_page_config(page_title="YOUTUBE Comment Sentiment Analyzer", page_icon="⏯️")
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 st.sidebar.title("App Info")
 st.sidebar.info("This app pulls real YouTube comments and analyzes & summarizes their emotional tone using anthropics LLM model")
