@@ -1,5 +1,4 @@
 import streamlit as st 
-from transformers import pipeline
 from googleapiclient.discovery import build
 import os
 from dotenv import load_dotenv
