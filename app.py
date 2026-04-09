@@ -25,7 +25,7 @@ hide_st_style = """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
 st.sidebar.title("App Info")
-st.sidebar.info("This app pulls real YouTube comments and analyzes & summarizes their emotional tone using anthropics LLM model")
+st.sidebar.info("This app pulls real YouTube comments and analyzes & summarizes their emotional tone using Groq's LLM model")
 st.sidebar.caption("Built with Python & Streamlit")
 
 st.title("YouTube Comment Analyzer")
