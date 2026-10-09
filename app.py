@@ -14,7 +14,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 #streamlit page UI setup
-st.set_page_config(page_title="YOUTUBE Comment Sentiment Analyzer", page_icon="⏯️")
+st.set_page_config(page_title="VibeSight", page_icon="⏯️")
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -28,7 +28,7 @@ st.sidebar.title("App Info")
 st.sidebar.info("This app pulls real YouTube comments and analyzes & summarizes their emotional tone using Groq's LLM model")
 st.sidebar.caption("Built with Python & Streamlit")
 
-st.title("YouTube Comment Analyzer")
+st.title("VibeSight")
 st.divider()
 
 client = Groq(api_key=GROQ_API_KEY)  #connection to llm api
